@@ -1,85 +1,74 @@
-//
-//  Usage_StatusApp.swift
-//  Usage Status
-//
-//  Created by deargo on 19.06.2026.
-//
-
 import SwiftUI
 
 @main
 struct Usage_StatusApp: App {
     @StateObject private var manager = UsageManager()
-    
+
     var body: some Scene {
         MenuBarExtra {
-            ContentView()
+            ContentView(manager: manager)
         } label: {
-            menuBarImage
+            MenuBarCompositeLabel(configs: manager.configs, usage: manager.usage)
         }
         .menuBarExtraStyle(.window)
     }
-    
-    private var menuBarImage: some View {
-        let enabledConfigs = manager.configs.filter { $0.isEnabled }
-        
-        let view = MenuBarLabelView(configs: enabledConfigs, manager: manager)
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 2.0 // Render at high-density for Retina screens
-        
-        if let nsImage = renderer.nsImage {
-            nsImage.isTemplate = true // Enables automatic light/dark theme tinting
-            return Image(nsImage: nsImage)
+}
+
+private struct MenuBarCompositeLabel: View {
+    let configs: [ToolConfig]
+    let usage: [ToolConfig.Provider: ToolUsage]
+
+    var body: some View {
+        if let image = renderedImage {
+            Image(nsImage: image)
+        } else {
+            Image(systemName: "chart.bar")
         }
-        
-        // Fallback standard symbol if renderer fails
-        return Image(systemName: "sparkles")
+    }
+
+    private var renderedImage: NSImage? {
+        let renderer = ImageRenderer(
+            content: MenuBarLabelContent(configs: configs, usage: usage)
+        )
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let image = renderer.nsImage else { return nil }
+        image.isTemplate = true
+        return image
     }
 }
 
-// MARK: - Menu Bar Renderable SwiftUI View
-struct MenuBarLabelView: View {
+private struct MenuBarLabelContent: View {
     let configs: [ToolConfig]
-    let manager: UsageManager
-    
+    let usage: [ToolConfig.Provider: ToolUsage]
+
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(configs) { config in
-                let stats = manager.stats(for: config)
-                let pct = stats.limit5h > 0 ? Double(stats.remaining5h) / Double(stats.limit5h) : 0.0
-                
-                HStack(spacing: 4) {
-                    Image(imageAssetName(for: config.name))
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 12, height: 12)
-                    
-                    // Circular progress gauge
-                    ZStack {
-                        Circle()
-                            .stroke(Color.primary.opacity(0.25), lineWidth: 1.2)
-                            .frame(width: 8, height: 8)
-                        
-                        Circle()
-                            .trim(from: 0.0, to: CGFloat(min(1.0, max(0.0, pct))))
-                            .stroke(Color.primary, style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
-                            .frame(width: 8, height: 8)
-                            .rotationEffect(Angle(degrees: -90))
-                    }
+        HStack(spacing: 6) {
+            ForEach(configs.filter(\.isEnabled)) { config in
+                HStack(spacing: 3) {
+                    ProviderIcon(provider: config.provider)
+                    gauge(for: usage[config.provider]?.primary)
                 }
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
-        .background(Color.clear)
+        .fixedSize(horizontal: true, vertical: true)
+        .padding(.horizontal, 2)
+        .frame(height: 18)
     }
-    
-    private func imageAssetName(for name: String) -> String {
-        switch name {
-        case "Antigravity": return "antigravity_logo"
-        case "Claude Code": return "claude_code_logo"
-        case "Codex": return "codex_logo"
-        default: return ""
+
+    private func gauge(for window: UsageWindow?) -> some View {
+        ZStack {
+            Circle()
+                .stroke(.primary.opacity(0.2), lineWidth: 1.2)
+            if let window {
+                Circle()
+                    .trim(from: 0, to: window.remainingPercent / 100)
+                    .stroke(.primary, style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            } else {
+                Image(systemName: "questionmark")
+                    .font(.system(size: 6, weight: .bold))
+            }
         }
+        .frame(width: 9, height: 9)
     }
 }

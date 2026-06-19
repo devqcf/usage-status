@@ -1,198 +1,140 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var manager = UsageManager()
-    
+    @ObservedObject var manager: UsageManager
+
+    private var enabledTools: [ToolConfig] {
+        manager.configs.filter(\.isEnabled)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HeaderView(manager: manager)
-            
-            Divider()
-                .opacity(0.15)
-            
-            VStack(spacing: 14) {
-                let enabledTools = manager.configs.filter { $0.isEnabled }
-                
-                if enabledTools.isEmpty {
-                    Text("No active trackers.")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .padding(.vertical, 20)
-                        .frame(maxWidth: .infinity)
-                } else {
-                    ForEach(enabledTools) { config in
-                        ToolRowView(config: config, manager: manager)
-                        
-                        if config.name != enabledTools.last?.name {
-                            Divider()
-                                .opacity(0.08)
-                                .padding(.vertical, 2)
-                        }
-                    }
-                }
-            }
-            .padding(14)
+            header
+            Divider().opacity(0.15)
+            toolList
         }
-        .frame(width: 260)
-        .background(Color.clear)
+        .frame(width: 290)
     }
-}
 
-// MARK: - Header View
-struct HeaderView: View {
-    @ObservedObject var manager: UsageManager
-    
-    var body: some View {
+    private var header: some View {
         HStack {
-            Text("Limits")
+            Text("Usage limits")
                 .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.primary)
-            
             Spacer()
-            
-            Button(action: {
-                withAnimation {
-                    manager.forceRefresh()
-                }
-            }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+            Button("Refresh", systemImage: "arrow.clockwise") {
+                manager.forceRefresh()
             }
+            .labelStyle(.iconOnly)
             .buttonStyle(.plain)
-            .help("Refresh logs")
+            .disabled(manager.isRefreshing)
+            .help("Refresh local usage data")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 9)
+    }
+
+    private var toolList: some View {
+        VStack(spacing: 14) {
+            ForEach(Array(enabledTools.enumerated()), id: \.element.id) { index, config in
+                ToolRowView(config: config, usage: manager.usage(for: config))
+                if index < enabledTools.count - 1 {
+                    Divider().opacity(0.08)
+                }
+            }
+        }
+        .padding(14)
     }
 }
 
-// MARK: - Tool Row View
-struct ToolRowView: View {
+private struct ToolRowView: View {
     let config: ToolConfig
-    @ObservedObject var manager: UsageManager
-    
+    let usage: ToolUsage
+
     var body: some View {
-        let stats = manager.stats(for: config)
-        
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                toolIcon(for: config.name)
-                    .foregroundColor(.primary)
+                ProviderIcon(provider: config.provider)
                 Text(config.name)
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.primary)
+                Spacer()
+                if let updatedAt = usage.updatedAt {
+                    Text(updatedAt, style: .relative)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
             }
-            
-            VStack(spacing: 6) {
-                CompactLimitRow(
-                    label: "5-Hour",
-                    used: stats.used5h,
-                    limit: stats.limit5h,
-                    pct: stats.pct5h,
-                    nextReset: stats.next5hReset
-                )
-                
-                CompactLimitRow(
-                    label: "Weekly",
-                    used: stats.usedWeekly,
-                    limit: stats.limitWeekly,
-                    pct: stats.pctWeekly,
-                    nextReset: stats.nextWeeklyReset
-                )
+
+            switch usage.state {
+            case .available:
+                if let primary = usage.primary {
+                    LimitRow(window: primary)
+                }
+                if let secondary = usage.secondary {
+                    LimitRow(window: secondary)
+                }
+            case .unavailable(let reason), .error(let reason):
+                Label(reason, systemImage: "exclamationmark.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-    
-    @ViewBuilder
-    private func toolIcon(for name: String) -> some View {
-        switch name {
-        case "Antigravity":
-            Image("antigravity_logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 12, height: 12)
-        case "Claude Code":
-            Image("claude_code_logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 12, height: 12)
-        case "Codex":
-            Image("codex_logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 12, height: 12)
-        default:
-            Image(systemName: "circle")
-                .font(.system(size: 12))
         }
     }
 }
 
-// MARK: - Compact Limit Row View
-struct CompactLimitRow: View {
-    let label: String
-    let used: Int
-    let limit: Int
-    let pct: Double
-    let nextReset: TimeInterval?
-    
+private struct LimitRow: View {
+    let window: UsageWindow
+
+    private var label: String {
+        switch window.windowMinutes {
+        case 300: return "5-hour"
+        case 10_080: return "Weekly"
+        default:
+            let hours = window.windowMinutes / 60
+            return hours < 24 ? "\(hours)-hour" : "\(hours / 24)-day"
+        }
+    }
+
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 4) {
             HStack {
                 Text(label)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                
-                if pct > 0 && nextReset != nil {
-                    Text(formatShortCountdown(nextReset))
+                    .foregroundStyle(.secondary)
+                if let resetsAt = window.resetsAt {
+                    Text("resets \(resetsAt, style: .relative)")
                         .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.tertiary)
                 }
-                
                 Spacer()
-                
-                Text("\(used)/\(limit)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.primary)
+                Text("\(Int(window.usedPercent.rounded()))% used")
+                    .fontWeight(.semibold)
             }
-            
-            // Slim monochrome progress line
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.primary.opacity(0.08))
-                        .frame(height: 3)
-                    
-                    Capsule()
-                        .fill(Color.primary)
-                        .frame(width: geo.size.width * CGFloat(min(1.0, pct)), height: 3)
-                }
-            }
-            .frame(height: 3)
+            .font(.system(size: 12))
+
+            ProgressView(value: window.usedPercent, total: 100)
+                .progressViewStyle(.linear)
+                .tint(window.usedPercent >= 90 ? .red : .primary)
+                .accessibilityLabel("\(label) usage")
+                .accessibilityValue("\(Int(window.usedPercent.rounded())) percent used")
         }
-    }
-    
-    private func formatShortCountdown(_ seconds: TimeInterval?) -> String {
-        guard let seconds = seconds else { return "" }
-        let intSecs = Int(seconds)
-        if intSecs < 60 {
-            return "(\(intSecs)s)"
-        }
-        let mins = intSecs / 60
-        if mins < 60 {
-            return "(\(mins)m)"
-        }
-        let hours = mins / 60
-        if hours < 24 {
-            return "(\(hours)h)"
-        }
-        let days = hours / 24
-        return "(\(days)d)"
     }
 }
 
-#Preview {
-    ContentView()
+struct ProviderIcon: View {
+    let provider: ToolConfig.Provider
+
+    var body: some View {
+        Image(assetName)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 12, height: 12)
+    }
+
+    private var assetName: String {
+        switch provider {
+        case .antigravity: return "antigravity_logo"
+        case .claude: return "claude_code_logo"
+        case .codex: return "codex_logo"
+        }
+    }
 }

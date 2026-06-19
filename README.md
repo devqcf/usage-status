@@ -16,11 +16,11 @@ A lightweight, native macOS menu bar application to track your rolling 5-hour an
 
 ## ✨ Features
 
-- **🔋 Real-time Log-Watching:** Monitors your local CLI history files (`~/.gemini/antigravity-cli/history.jsonl` and `~/.claude/history.jsonl`) to instantly update your usage counts.
+- **🔋 Provider-reported usage:** Reads percentage and reset information directly from supported local provider session data.
 - **🎨 Native Integration:** Clean, monochrome SwiftUI design that seamlessly blends with your macOS menu bar (supports dark & light modes).
 - **📈 Legibility-First UI:** Enlarged legibility typography with thin, non-intrusive progress bars and circular menu bar gauges.
 - **⏳ Smart Rollover Prediction:** Displays precise, rolling-window countdowns (e.g., `(14m)` or `(2d)`) showing exactly when your limit will refresh.
-- **⚡ No Configuration:** Completely configuration-free. Just launch it, and it works.
+- **⚡ Honest availability:** Missing or unsupported local data is shown as unavailable instead of being reported as zero usage.
 
 ---
 
@@ -47,6 +47,6 @@ The compiled application bundle will be generated under `build/Release/Usage Sta
 
 ## 📂 Project Architecture
 
-- **[Usage_StatusApp.swift](file:///Users/deargo/Projects/Usage%20Status/Usage%20Status/Usage_StatusApp.swift)**: Handles the `MenuBarExtra` lifecycle and dynamically renders the vector brand logos (Gemini Sparkle, Anthropic Hand, OpenAI Flower) and circular gauge icons using `ImageRenderer`.
-- **[ContentView.swift](file:///Users/deargo/Projects/Usage%20Status/Usage%20Status/ContentView.swift)**: The main popover interface with clean usage meters, rollover intervals, and progress bars.
-- **[UsageManager.swift](file:///Users/deargo/Projects/Usage%20Status/Usage%20Status/UsageManager.swift)**: Uses Grand Central Dispatch file system event streams to monitor changes to log files reactively.
+- **Usage_StatusApp.swift**: Owns the menu bar scene and its compact gauges.
+- **ContentView.swift**: Displays provider-reported percentages, reset times, and data availability.
+- **UsageManager.swift**: Loads provider snapshots off the main thread and monitors local data directories for changes.
